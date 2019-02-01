@@ -3,6 +3,7 @@ const fs = require('fs-extra');
 const path = require('path');
 const semver = require('semver');
 const yaml = require('js-yaml');
+const readline = require('readline-promise').default;
 
 
 function isJsonFile(filename) {
@@ -150,6 +151,104 @@ function setReplicas(source, target) {
   });
 }
 
+function exportParams(outputPath, servicesToDeploy) {
+  let params = {
+    global: {},
+    components: {}
+  };
+
+  servicesToDeploy.forEach((serviceDef, serviceName, map) => {
+    let component = {};
+    component['replicas'] = 1;
+    component['name'] = serviceName;
+    component['image'] = serviceDef.image;
+    component['tag'] = serviceDef.tag;
+    component['containerPort'] = serviceDef.ports[0];
+
+    serviceDef.environment_variables.forEach((ev, name, map) => {
+      if (ev.value == null) {
+        throw new Error('Param components.' + serviceName + '.' + name + ' has no value');
+      }
+      component[name] = ev.value;
+    });
+
+    params.components[serviceName] = component;
+  });
+
+  fs.writeJson(path.join(outputPath, 'params.libsonnet'), params);
+}
+
+function exportGateways(outputPath, servicesToDeploy, env) {
+  env.services.forEach(envService => {
+    let selector = '';
+    if (envService.vamp.gateway.selector.type == 'label') {
+      let dplService = servicesToDeploy.get(envService.name);
+      dplService['labels'].forEach((value, name, map) => {
+        if (envService.vamp.gateway.selector.discriminator == name) {
+          selector += "label(" + name + ")((.*)) && ";
+        } else {
+          let v = value;
+          if (value == 'name') {
+            v = envService.name;
+          } else if (value == 'tag') {
+            v = envService.tag;
+          } else {
+            v = dplService.environment_variables.get(value).value;
+          }
+          selector += "label(" + name + ")(" + v + ") && ";
+        }
+      });
+
+      // remove trailing ' && '
+      selector = selector.slice(0, -3);
+    }
+
+    let data = '';
+    data += "name: " + envService.name + "\n";
+    data += "port: " + envService.port + "\n";
+    data += "selector: " + selector + "\n";
+
+    fs.outputFile(path.join(outputPath, envService.name + "-gw.yml"), data);
+  });
+}
+
+function writeDeploymentJsonnet(outputPath, template, service) {
+  const rlp = readline.createInterface({
+    terminal: false,
+    input: fs.createReadStream(template)
+  });
+
+  let data = '';
+
+  return rlp
+    .forEach((line, index) => {
+      if (line.includes('@@componentName@@')) {
+        data += line.replace('@@componentName@@', service.name);
+        data += '\r\n';
+      } else if (line.includes('@@labels@@')) {
+        let labels = '';
+        service.labels.forEach((value, name, map) => {
+          labels += '  ' + name + ': params.' + value + '@';
+        });
+        labels = labels.slice(0, -1);
+        labels = labels.replace(/@/g, ',\r\n');
+        data += labels;
+        data += '\r\n';
+      } else if (line.includes('@@withEnv@@')) {
+        service.environment_variables.forEach((ev, name, map) => {
+          data += '  .withEnv(container.envType.new("' + ev.name + '", params.' + name + '))';
+          data += '\r\n';
+        });
+      } else {
+        data += line;
+        data += '\r\n';
+      }
+    })
+    .then(() => {
+      return fs.outputFile(path.join(outputPath, service.name + '.jsonnet'), data);
+    });
+}
+
 
 program
   .version('0.1.0')
@@ -227,7 +326,6 @@ let serviceDefs = new Map();
 let applicationDef;
 let environmentDef;
 
-
 // read sevice defs
 fs.readdir(serviceDefsDir)
   .then(filenames => {
@@ -236,7 +334,6 @@ fs.readdir(serviceDefsDir)
     if (filenames.length == 0) {
       console.error("Not found: " + path.join(serviceDefsDir, '*.json'));
       process.exit(4);
-
     }
 
     return Promise.all(filenames.map(filename => {
@@ -321,75 +418,22 @@ fs.readdir(serviceDefsDir)
     return resolvedServices;
   })
   .then(resolvedServices => {
-    // export params
-    exportParams(resolvedServices);
-    exportGateways(resolvedServices, environmentDef);
+    // create gateways
+    exportGateways(outputDir, resolvedServices, environmentDef);
 
-    return resolvedServices;
+    // export params
+    exportParams(outputDir, resolvedServices);
+
+    // write ksonnet files
+    let files = [];
+    resolvedServices.forEach((service, name, map) => {
+      files.push(writeDeploymentJsonnet(outputDir, 'deployment-template.jsonnet', service));
+    });
+
+    return Promise.all(files);
   })
 
   .catch(err => {
     console.error(err);
   });
 
-
-function exportParams(servicesToDeploy) {
-  let params = {
-    global: {},
-    components: {}
-  };
-
-  servicesToDeploy.forEach((serviceDef, serviceName, map) => {
-    let component = {};
-    component['replicas'] = 1;
-    component['name'] = serviceName;
-    component['image'] = serviceDef.image;
-    component['tag'] = serviceDef.tag;
-    component['containerPort'] = serviceDef.ports[0];
-
-    serviceDef.environment_variables.forEach((ev, name, map) => {
-      if (ev.value == null) {
-        throw new Error('Param components.' + serviceName + '.' + name + ' has no value');
-      }
-      component[name] = ev.value;
-    });
-
-    params.components[serviceName] = component;
-  });
-
-  fs.writeJson('params.libsonnet', params);
-}
-
-function exportGateways(servicesToDeploy, env) {
-  env.services.forEach(envService => {
-    let selector = '';
-    if (envService.vamp.gateway.selector.type == 'label') {
-      let dplService = servicesToDeploy.get(envService.name);
-      dplService['labels'].forEach((value, name, map) => {
-        if (envService.vamp.gateway.selector.discriminator == name) {
-          selector += "label(" + name + ")((.*)) && ";
-        } else {
-          let v = value;
-          if (value == 'name') {
-            v = envService.name;
-          } else if (value == 'tag') {
-            v = envService.tag;
-          } else {
-            v = dplService.environment_variables.get(value).value;
-          }
-          selector += "label(" + name + ")(" + v + ") && ";
-        }
-      });
-
-      // remove trailing ' && '
-      selector = selector.slice(0, -3);
-    }
-
-    let data = '';
-    data += "name: " + envService.name + "\n";
-    data += "port: " + envService.port + "\n";
-    data += "selector: " + selector + "\n";
-
-    fs.outputFile(envService.name + "-gw.yml", data);
-  });
-}
