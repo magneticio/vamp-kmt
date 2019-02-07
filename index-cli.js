@@ -258,7 +258,7 @@ program
   .option('-e, --environment-defs <dir>', 'location of the application definitions')
   .option('-E, --environment <file>', 'application definition')
   .option('-o, --output <dir>', 'output dir, defaults to the current dir')
-  .option('-f, --format', 'output format, defaults to ksonnet')
+  .option('-D, --deployment-template <file>', 'the Jsonnet template used to create deployments')
   .parse(process.argv);
 
 /*
@@ -268,7 +268,6 @@ console.log('application file: ' + program.application);
 console.log('environment-defs dir: ' + program.environmentDefs);
 console.log('environment file: ' + program.environment);
 console.log('output dir: ' + program.output);
-console.log('format: ' + program.format);
 */
 
 let serviceDefsDir;
@@ -315,12 +314,27 @@ if (dirExists(program.output)) {
   outputDir = '.';
 }
 
+const OF_KSONNET = 'ksonnet';
+let outputFormat = OF_KSONNET;
+
+let deploymentTemplateFile;
+if (program.deploymentTemplate == undefined) {
+  deploymentTemplateFile = path.join('.', 'deployment-template.jsonnet');
+} else if (fileExists(program.deploymentTemplate)) {
+  deploymentTemplateFile = program.deploymentTemplate;
+} else {
+  console.error("--deployment-template must specify a valid Jsonnet template");
+  process.exit(4);
+}
+
 console.log('service-defs dir: ' + serviceDefsDir);
 console.log('application-defs dir: ' + applicationDefsDir);
 console.log('application file: ' + applicationDefFile);
 console.log('environment-defs dir: ' + environmentDefsDir);
 console.log('environment file: ' + environmentDefFile);
 console.log('output dir: ' + outputDir);
+console.log('output format: ' + outputFormat);
+console.log('deployment template: ' + deploymentTemplateFile);
 
 let serviceDefs = new Map();
 let applicationDef;
@@ -333,7 +347,7 @@ fs.readdir(serviceDefsDir)
 
     if (filenames.length == 0) {
       console.error("Not found: " + path.join(serviceDefsDir, '*.json'));
-      process.exit(4);
+      process.exit(10);
     }
 
     return Promise.all(filenames.map(filename => {
@@ -362,7 +376,7 @@ fs.readdir(serviceDefsDir)
     // TODO try YAML
 
     console.error("Not found: " + f);
-    process.exit(5);
+    process.exit(11);
   })
   .then(file => {
     environmentDef = file;
@@ -421,16 +435,21 @@ fs.readdir(serviceDefsDir)
     // create gateways
     exportGateways(outputDir, resolvedServices, environmentDef);
 
-    // export params
-    exportParams(outputDir, resolvedServices);
+    if (outputFormat === OF_KSONNET) {
+      // export params
+      exportParams(outputDir, resolvedServices);
 
-    // write ksonnet files
-    let files = [];
-    resolvedServices.forEach((service, name, map) => {
-      files.push(writeDeploymentJsonnet(outputDir, 'deployment-template.jsonnet', service));
-    });
+      // write ksonnet files
+      let files = [];
+      resolvedServices.forEach((service, name, map) => {
+        files.push(writeDeploymentJsonnet(outputDir, deploymentTemplateFile, service));
+      });
 
-    return Promise.all(files);
+      return Promise.all(files);
+    } else {
+      console.error("Unsupported output format: " + outputFormat);
+      process.exit(20);
+    }
   })
 
   .catch(err => {
