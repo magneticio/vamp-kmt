@@ -343,7 +343,7 @@ let environmentDef;
 // read sevice defs
 fs.readdir(serviceDefsDir)
   .then(filenames => {
-    filenames = filenames.filter(isJsonFile);
+    filenames = filenames.filter(isDataFile);
 
     if (filenames.length == 0) {
       console.error("Not found: " + path.join(serviceDefsDir, '*.json'));
@@ -351,7 +351,20 @@ fs.readdir(serviceDefsDir)
     }
 
     return Promise.all(filenames.map(filename => {
-      return fs.readJson(path.join(serviceDefsDir, filename));
+      let fullPath = path.join(serviceDefsDir, filename);
+      if (isYamlFile(fullPath)) {
+        console.log('YAML: ' + fullPath);
+        return new Promise((resolve, reject) => {
+          try {
+            resolve(yaml.safeLoad(fs.readFileSync(fullPath, 'utf8')))
+          } catch (err) {
+            reject(err)
+          }
+        })
+      } else {
+        console.log('JSON: ' + fullPath);
+        return fs.readJson(path.join(serviceDefsDir, filename));
+      }
     }));
   })
   .then(files => {
