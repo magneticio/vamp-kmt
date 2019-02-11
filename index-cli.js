@@ -52,6 +52,20 @@ function fileExists(path) {
   return true;
 }
 
+function readFile(file) {
+  if (isYamlFile(file)) {
+    return new Promise((resolve, reject) => {
+      try {
+        resolve(yaml.safeLoad(fs.readFileSync(file, 'utf8')))
+      } catch (err) {
+        reject(err)
+      }
+    })
+  } else {
+    return fs.readJson(file);
+  }  
+}
+
 function addVersion(serviceDef, version) {
   serviceDef.tag = version.tag;
   serviceDef.dependencies = version.dependencies;
@@ -351,20 +365,7 @@ fs.readdir(serviceDefsDir)
     }
 
     return Promise.all(filenames.map(filename => {
-      let fullPath = path.join(serviceDefsDir, filename);
-      if (isYamlFile(fullPath)) {
-        console.log('YAML: ' + fullPath);
-        return new Promise((resolve, reject) => {
-          try {
-            resolve(yaml.safeLoad(fs.readFileSync(fullPath, 'utf8')))
-          } catch (err) {
-            reject(err)
-          }
-        })
-      } else {
-        console.log('JSON: ' + fullPath);
-        return fs.readJson(path.join(serviceDefsDir, filename));
-      }
+      return readFile(path.join(serviceDefsDir, filename));
     }));
   })
   .then(files => {
@@ -373,24 +374,29 @@ fs.readdir(serviceDefsDir)
     });
 
     // read app config
-    return fs.readJson(applicationDefFile);
+    return readFile(applicationDefFile);
   })
   .then(file => {
     applicationDef = file;
 
     // read env config
     if (environmentDefFile) {
-      return fs.readJson(environmentDefFile);
+      return readFile(environmentDefFile);
     }
+
     var f = path.join(environmentDefsDir, applicationDef.environment.name + '.json');
     if (fileExists(f)) {
-      return fs.readJson(f);
+      return readFile(f);
     }
-    // TODO try YAML
+    
+    f = path.join(environmentDefsDir, applicationDef.environment.name + '.yaml');
+    if (fileExists(f)) {
+      return readFile(f);
+    }
 
-    console.error("Not found: " + f);
+    console.error('Not found: ' + path.join(environmentDefsDir, applicationDef.environment.name) + '.[json|yaml|yml]');
     process.exit(11);
-  })
+})
   .then(file => {
     environmentDef = file;
 
