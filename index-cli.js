@@ -7,16 +7,19 @@ const readline = require('readline-promise').default;
 
 
 function isJsonFile(filename) {
-  return filename.split('.')[1] == 'json';
+  const pieces = filename.split('.');
+  return pieces[pieces.length - 1] == 'json';
 }
 
 function isYamlFile(filename) {
-  const ext = filename.split('.')[1];
+  const pieces = filename.split('.');
+  const ext = pieces[pieces.length - 1];
   return ext == 'yml' || ext == 'yaml';
 }
 
 function isDataFile(filename) {
-  const ext = filename.split('.')[1];
+  const pieces = filename.split('.');
+  const ext = pieces[pieces.length - 1];
   return ext == 'json' || ext == 'yml' || ext == 'yaml';
 }
 
