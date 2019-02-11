@@ -1,6 +1,7 @@
 const program = require('commander');
 const fs = require('fs-extra');
 const path = require('path');
+const klawSync = require('klaw-sync');
 const semver = require('semver');
 const yaml = require('js-yaml');
 const readline = require('readline-promise').default;
@@ -63,7 +64,7 @@ function readFile(file) {
       } catch (err) {
         reject(err)
       }
-    })
+    });
   } else {
     return fs.readJson(file);
   }  
@@ -353,24 +354,26 @@ console.log('output dir: ' + outputDir);
 console.log('output format: ' + outputFormat);
 console.log('deployment template: ' + deploymentTemplateFile);
 
+const klawDataFileFilter = (item) => {
+  const basename = path.basename(item.path);
+  // ignore hidden files and dirs (starting with .) and non data files (*.json|yaml|yml)
+  return basename === '.' || basename[0] !== '.' || (item.stats.isFile() && isDataFile(item.path));
+}
+
+// read sevice defs
+const serviceDefFiles = klawSync(serviceDefsDir, { nodir: true, depthLimit: 1, filter: klawDataFileFilter });
+if (serviceDefFiles.length == 0) {
+  console.error("No service definitions found reading: " + serviceDefsDir);
+  process.exit(10);
+}
+
 let serviceDefs = new Map();
 let applicationDef;
 let environmentDef;
 
-// read sevice defs
-fs.readdir(serviceDefsDir)
-  .then(filenames => {
-    filenames = filenames.filter(isDataFile);
-
-    if (filenames.length == 0) {
-      console.error("Not found: " + path.join(serviceDefsDir, '*.json'));
-      process.exit(10);
-    }
-
-    return Promise.all(filenames.map(filename => {
-      return readFile(path.join(serviceDefsDir, filename));
-    }));
-  })
+Promise.all(serviceDefFiles.map(f => {
+  return readFile(f.path);
+}))
   .then(files => {
     files.forEach(file => {
       serviceDefs.set(file.name, file);
@@ -387,21 +390,35 @@ fs.readdir(serviceDefsDir)
       return readFile(environmentDefFile);
     }
 
-    var f = path.join(environmentDefsDir, applicationDef.environment.name + '.json');
-    if (fileExists(f)) {
-      return readFile(f);
+    const envName = applicationDef.environment.name;
+
+    const klawNamedFileFilter = (item) => {
+      // ignore everything except data files (.json|yaml|yml) with the required name
+      return (item.stats.isFile() && isDataFile(item.path) && path.basename(item.path).startsWith(envName));
     }
     
-    f = path.join(environmentDefsDir, applicationDef.environment.name + '.yaml');
-    if (fileExists(f)) {
-      return readFile(f);
+    let environmentDefFiles = klawSync(environmentDefsDir,
+      { nodir: true, depthLimit: 0, filter: klawDataFileFilter });
+    if (environmentDefFiles.length == 0) {
+      environmentDefFiles = klawSync(path.join(environmentDefsDir, envName),
+        { nodir: true, depthLimit: 0, filter: klawNamedFileFilter });
+      if (environmentDefFiles.length == 0) {
+        console.error('No environment definition found for ' + envName + ' in ' + environmentDefsDir);
+        process.exit(11);
+      }
     }
-
-    console.error('Not found: ' + path.join(environmentDefsDir, applicationDef.environment.name) + '.[json|yaml|yml]');
-    process.exit(11);
+    
+    return readFile(environmentDefFiles[0].path);
 })
   .then(file => {
     environmentDef = file;
+
+    // check environment name match
+    if (environmentDef.environment.name !== applicationDef.environment.name) {
+      console.error('No environment definition found for ' + applicationDef.environment.name 
+        + ' in ' + environmentDefsDir);
+      process.exit(12);
+  }
 
     // process dependencies
     let resolvedServices = new Map();
