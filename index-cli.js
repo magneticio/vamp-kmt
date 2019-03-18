@@ -315,12 +315,12 @@ if (applicationDefFile == undefined && applicationDefsDir == undefined) {
 
 let environmentDefFile;
 let environmentDefsDir;
-if (program.environmentDef == undefined) {
+if (program.environment == undefined) {
   if (dirExists(program.environmentDefs)) {
     environmentDefsDir = program.environmentDefs;
   }
 } else if (isDataFile(program.environment) && fileExists(program.environment)) {
-  applicationDefFile = program.environment
+  environmentDefFile = program.environment
 }
 if (environmentDefFile == undefined && environmentDefsDir == undefined) {
   console.error("Either --environment-defs <dir> or --environment <file> must be specified");

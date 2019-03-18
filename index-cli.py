@@ -118,21 +118,6 @@ def parse_args():
     return args
 
 
-def parse_args2():
-    args = Args()
-    return args
-
-
-class Args:
-    def __init__(self):
-        self.service_defs = '/Users/tymoteuszgach/git/vamp/vamp-kmt-examples/tutorial5/services'
-        self.application = '/Users/tymoteuszgach/git/vamp/vamp-kmt-examples/tutorial5/applications/vampio-tutorial5-eu/application.yml'
-        self.environment = '/Users/tymoteuszgach/git/vamp/vamp-kmt-examples/tutorial5/environments/vampio-tutorial5-eu/vampio-tutorial5-eu.json'
-        self.output = '.'
-        self.output_format = OF_KSONNET
-        self.deployment_template = 'test.jsonnet'
-
-
 def read_yaml(yaml_file_path):
     with open(yaml_file_path, 'r') as f:
         return yaml.safe_load(f)
@@ -266,8 +251,8 @@ def resolve_services(requested_services, service_defs):
         service_def_labels = service_def.get('labels', None)
         if service_def_labels != None:
             for labels in service_def_labels:
-                for prop in labels:
-                    label_map[prop] = subst_param(prop)
+                for label_name, label_value in labels.items():
+                    label_map[label_name] = subst_param(label_value)
         service_def['labels'] = label_map
     return resolved_services
 
@@ -342,7 +327,7 @@ def export_params(output_path, services_to_deploy):
             component[ev_name] = ev_value
         params['components'][service_name] = component
     with open(join(output_path, 'params.libsonnet'), 'w') as f:
-        f.write(params)
+        json.dump(params, f)
 
 
 def write_deployment_jsonnet(output_path, template, service):
@@ -375,7 +360,7 @@ def write_deployment_jsonnet(output_path, template, service):
 
 
 def main():
-    args = parse_args2()
+    args = parse_args()
 
     service_def_file_paths = get_service_defs_file_paths(args.service_defs)
     if len(service_def_file_paths) == 0:
@@ -396,6 +381,8 @@ def main():
     set_environment_variables(environment_def, resolved_services)
     set_labels(environment_def, resolved_services)
     set_replicas(environment_def, resolved_services)
+
+    print(json.dumps(resolved_services, indent=4))
 
     export_gateways(args.output, resolved_services, environment_def)
 
