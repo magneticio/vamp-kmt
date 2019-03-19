@@ -341,7 +341,7 @@ def write_deployment_jsonnet(output_path, template, service):
                 labels += '  {}: params.{}@'.format(
                     service_label_name, service_label_value)
             labels = labels[:-1]
-            labels = labels.replace('@', '\r\n')
+            labels = labels.replace('@', ',\r\n')
             data += labels
             data += '\r\n'
         elif '@@withEnv@@' in line:
