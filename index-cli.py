@@ -240,37 +240,33 @@ def resolve_services(requested_services, service_defs):
     for name, service_def in resolved_services.items():
         ev_map = {}
         service_def_env_variables = service_def.get(
-            'environment_variables', None)
-        if service_def_env_variables != None:
-            for env_variable in service_def_env_variables:
-                ev_map[env_variable.lower()] = {
-                    'name': env_variable, 'value': None}
+            'environment_variables', [])
+        for env_variable in service_def_env_variables:
+            ev_map[env_variable.lower()] = {
+                'name': env_variable, 'value': None}
         service_def['environment_variables'] = ev_map
 
         label_map = {}
-        service_def_labels = service_def.get('labels', None)
-        if service_def_labels != None:
-            for labels in service_def_labels:
-                for label_name, label_value in labels.items():
-                    label_map[label_name] = subst_param(label_value)
+        service_def_labels = service_def.get('labels', [])
+        for labels in service_def_labels:
+            for label_name, label_value in labels.items():
+                label_map[label_name] = subst_param(label_value)
         service_def['labels'] = label_map
     return resolved_services
 
 
 def set_environment_variables(source, target):
     for s in source['services']:
-        env_variables = s.get('environment_variables', None)
-        if env_variables != None:
-            for env_name, env_value in env_variables.items():
-                target[s['name']]['environment_variables'][env_name] = env_value
+        env_variables = s.get('environment_variables', {})
+        for env_name, env_value in env_variables.items():
+            target[s['name']]['environment_variables'][env_name]['value'] = env_value
 
 
 def set_labels(source, target):
     for s in source['services']:
-        labels = s.get('labels', None)
-        if labels != None:
-            for label_name, label_value in labels.items():
-                target[s['name']]['labels'][label_name] = label_value
+        labels = s.get('labels', {})
+        for label_name, label_value in labels.items():
+            target[s['name']]['labels'][label_name] = label_value
 
 
 def set_replicas(source, target):
@@ -295,8 +291,9 @@ def export_gateways(output_path, services_to_deploy, env):
                     elif label_value == 'tag':
                         v = env_service['tag']
                     else:
-                        v = dpl_service['environment_variables'][label_value]
+                        v = dpl_service['environment_variables'][label_value]['value']
                     selector += 'label({})({}) && '.format(label_name, v)
+            # remove trailing ' && '
             selector = selector[:-3]
 
         data = ''
@@ -320,7 +317,8 @@ def export_params(output_path, services_to_deploy):
         component['containerPort'] = service_def['ports'][0]
 
         env_variables = service_def.get('environment_variables', {})
-        for ev_name, ev_value in env_variables.items():
+        for ev_name, ev in env_variables.items():
+            ev_value = ev.get('value', None)
             if ev_value == None:
                 raise Exception('Param components. {}. {} has no value'.format(
                     service_name, ev_name))
@@ -342,7 +340,7 @@ def write_deployment_jsonnet(output_path, template, service):
             for service_label_name, service_label_value in service_labels.items():
                 labels += '  {}: params.{}@'.format(
                     service_label_name, service_label_value)
-            labels = labels.slice[:-1]
+            labels = labels[:-1]
             labels = labels.replace('@', '\r\n')
             data += labels
             data += '\r\n'
@@ -388,10 +386,9 @@ def main():
 
     if args.output_format == OF_KSONNET:
         export_params(args.output, resolved_services)
-        for service in resolved_services:
-            pass
-            # write_deployment_jsonnet(
-            # args.output, args.deployment_template, service)
+        for _, service in resolved_services.items():
+            write_deployment_jsonnet(
+                args.output, args.deployment_template, service)
     else:
         raise Exception(
             'Unsupported output format: {}'.format(args.output_format))
