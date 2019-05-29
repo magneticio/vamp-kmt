@@ -100,14 +100,6 @@ def parse_args():
 
     args = parser.parse_args()
 
-    print('service-defs dir: {}'.format(args.service_defs))
-    print('application-defs dir: {}'.format(args.application_defs))
-    print('application file: {}'.format(args.application))
-    print('environment-defs dir: {}'.format(args.environment_defs))
-    print('environment file: {}'.format(args.environment))
-    print('output dir: {}'.format(args.output))
-    print('output format: {}'.format(args.output_format))
-
     return args
 
 
