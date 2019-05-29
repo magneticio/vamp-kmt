@@ -1,11 +1,26 @@
-FROM circleci/python:3.7-node
+FROM circleci/python:3.7
 
-RUN sudo npm install vamp-cli-ee -global --production
+ENV FORKLIFT_VERSION 0.1.16
+ENV KUBECTL_VERSION 1.14.2
+ENV KUSTOMIZE_VERSION 2.0.3
 
-COPY . /usr/local/vamp-kmt/
-RUN cd /usr/local/vamp-kmt && sudo npm install -global --production
+# Install forklift
+RUN sudo curl -L https://github.com/magneticio/forklift/releases/download/v${FORKLIFT_VERSION}/forklift-linux-amd64  -o /usr/bin/forklift && \
+    sudo chmod +x /usr/bin/forklift
+    
+# Install kubectl
+RUN sudo curl -L https://storage.googleapis.com/kubernetes-release/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl -o /usr/bin/kubectl && \
+    sudo chmod +x /usr/bin/kubectl
 
-RUN base=https://github.com/magneticio/forklift/releases/download/0.1.0 && \
-    curl -L $base/forklift-$(uname -s)-$(uname -m) > /tmp/forklift && \
-    sudo mv /tmp/forklift /usr/local/bin/forklift && \
-    sudo chmod +x /usr/local/bin/forklift
+# Install kustomize
+RUN sudo curl -L https://github.com/kubernetes-sigs/kustomize/releases/download/v${KUSTOMIZE_VERSION}/kustomize_${KUSTOMIZE_VERSION}_linux_amd64  -o /usr/bin/kustomize && \
+    sudo chmod +x /usr/bin/kustomize
+
+# Install vamp-kmt  
+COPY requirements.txt /tmp
+RUN sudo pip install -r /tmp/requirements.txt
+
+COPY vamp-kmt.py /tmp
+RUN echo \#\!$(which python3) | cat - /tmp/vamp-kmt.py > /tmp/vamp-kmt && \
+    sudo mv /tmp/vamp-kmt /usr/bin/vamp-kmt && \
+    sudo chmod +x /usr/bin/vamp-kmt

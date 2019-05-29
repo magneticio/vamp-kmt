@@ -8,6 +8,7 @@ verify_ssl = true
 [packages]
 node-semver = "==0.6.1"
 PyYAML = "==5.1"
+gitpython = "*"
 
 [requires]
 python_version = "3.7"
