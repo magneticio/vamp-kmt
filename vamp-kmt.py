@@ -179,7 +179,7 @@ def add_version(service_def, version):
 def get_service_defs(service_def_file_paths):
     service_defs = {}
     for service_def_file_path in service_def_file_paths:
-        print ("*** service_def_file_path: " + service_def_file_path)
+        print ("Reading: " + service_def_file_path)
         file_content = read_data_file(service_def_file_path)
         service_defs[file_content['name']] = file_content
     return service_defs
@@ -217,6 +217,9 @@ def resolve_dependencies(requested_services, service_defs, resolved_services):
         if highest_version == None:
             raise Exception('No matching version found for {} {}\nAvailable versions: {}'.format(
                 name, req_version, available_versions))
+        else:
+            print('{}: resolved {} to version {} from {}'.format(
+                name, req_version, highest_version, available_versions))
         resolved_version = flatten_service_version(
             service_def, highest_version)
         resolved_services[name] = resolved_version
@@ -305,26 +308,32 @@ def write_deployment_kustomize(output_path, service_def):
             raise Exception('{}. {} has no value'.format(service_def['name'], ev_name))
         data += '{}={}\r\n'.format(ev['name'], ev_value)
 
-    with open(join(output_path, service_def['name'], 'configMap.env'), 'w') as f:
-        f.write(data)
+    if data != '':
+        with open(join(output_path, service_def['name'], 'configMap.env'), 'w') as f:
+            f.write(data)
 
 
 def main():
     args = parse_args()
+
+    print ("Reading: " + args.application)
+    application_def = read_data_file(args.application)
+
+    print ("Reading: " + args.environment)
+    environment_def = read_data_file(args.environment)
+    
+    if environment_def['environment']['name'] != application_def['environment']['name']:
+        raise Exception(
+            'There was a mismatch in application definition: `{}` and environment definition: `{}`'.format(
+                application_def.environment.name, environment_def.environment.name)
+        )
 
     service_def_file_paths = get_service_defs_file_paths(args.service_defs)
     if len(service_def_file_paths) == 0:
         raise Exception(
             'No service definitions found reading: {}'.format(args.service_defs))
     service_defs = get_service_defs(service_def_file_paths)
-    application_def = read_data_file(args.application)
-    environment_def = read_data_file(args.environment) if args.environment != None else read_data_file(
-        get_environment_def_file_path(args.environment_defs)[0])
-    if environment_def['environment']['name'] != application_def['environment']['name']:
-        raise Exception(
-            'There was a mismatch in application definition: `{}` and environment definition: `{}`'.format(
-                application_def.environment.name, environment_def.environment.name)
-        )
+
     resolved_services = resolve_services(
         application_def['services'], service_defs)
     set_environment_variables(application_def, resolved_services)
@@ -332,8 +341,6 @@ def main():
     set_labels(environment_def, resolved_services)
     set_replicas(environment_def, resolved_services)
 
-    print(json.dumps(resolved_services, indent=4))
-    
     export_gateways(join(args.output, 'infrastructure', 'vamp', 'gateways'), resolved_services, environment_def)
 
     if args.output_format == OF_KUSTOMIZE:
