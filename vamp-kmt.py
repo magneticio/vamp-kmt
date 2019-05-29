@@ -10,7 +10,7 @@ from semver import max_satisfying, satisfies
 
 import yaml
 
-OF_KSONNET = 'ksonnet'
+OF_KUSTOMIZE = 'kustomize'
 JSON_EXTENSIONS = ['.json']
 YAML_EXTENSIONS = ['.yml', '.yaml']
 DATA_FILE_EXTENSIONS = JSON_EXTENSIONS + YAML_EXTENSIONS
@@ -61,7 +61,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
 
     parser.add_argument(
-        'service_defs',
+        '-s', '--service-defs',
         type=directory,
         help='location of the service definitions')
 
@@ -93,16 +93,10 @@ def parse_args():
 
     parser.add_argument(
         '-f', '--output-format',
-        default=OF_KSONNET,
-        choices=[OF_KSONNET],
+        default=OF_KUSTOMIZE,
+        choices=[OF_KUSTOMIZE],
         help='output format'
     )
-
-    parser.add_argument(
-        '-D', '--deployment-template',
-        type=file,
-        default='./deployment-template.jsonnet',
-        help='the Jsonnet template used to create deployments')
 
     args = parser.parse_args()
 
@@ -113,7 +107,6 @@ def parse_args():
     print('environment file: {}'.format(args.environment))
     print('output dir: {}'.format(args.output))
     print('output format: {}'.format(args.output_format))
-    print('deployment template: {}'.format(args.deployment_template))
 
     return args
 
@@ -121,6 +114,11 @@ def parse_args():
 def read_yaml(yaml_file_path):
     with open(yaml_file_path, 'r') as f:
         return yaml.safe_load(f)
+
+
+def write_yaml(yaml_file_path, data):
+    with open(yaml_file_path, 'w') as f:
+        yaml.dump(data, f, default_flow_style=False)
 
 
 def read_json(json_file_path):
@@ -154,7 +152,7 @@ def get_file_paths(dir_path, extensions, recursive=False):
 
 
 def get_service_defs_file_paths(service_defs_dir_path):
-    return get_file_paths(service_defs_dir_path, DATA_FILE_EXTENSIONS, recursive=True)
+    return get_file_paths(service_defs_dir_path, JSON_EXTENSIONS, recursive=True)
 
 
 def get_environment_def_file_path(environment_defs_dir_path, environment):
@@ -189,6 +187,7 @@ def add_version(service_def, version):
 def get_service_defs(service_def_file_paths):
     service_defs = {}
     for service_def_file_path in service_def_file_paths:
+        print ("*** service_def_file_path: " + service_def_file_path)
         file_content = read_data_file(service_def_file_path)
         service_defs[file_content['name']] = file_content
     return service_defs
@@ -301,59 +300,20 @@ def export_gateways(output_path, services_to_deploy, env):
         data += 'port: {}\n'.format(env_service['port'])
         data += 'selector: {}\n'.format(selector)
 
-        with open(join(output_path, env_service['name'] + '-gw.yml'), 'w') as f:
+        with open(join(output_path, env_service['name'] + '.yaml'), 'w') as f:
             f.write(data)
 
 
-def export_params(output_path, services_to_deploy):
-    params = {'global': {}, 'components': {}}
-
-    for service_name, service_def in services_to_deploy.items():
-        component = {}
-        component['replicas'] = 1
-        component['name'] = service_name
-        component['image'] = service_def.get('image', None)
-        component['tag'] = service_def['tag']
-        component['containerPort'] = service_def['ports'][0]
-
-        env_variables = service_def.get('environment_variables', {})
-        for ev_name, ev in env_variables.items():
-            ev_value = ev.get('value', None)
-            if ev_value == None:
-                raise Exception('Param components. {}. {} has no value'.format(
-                    service_name, ev_name))
-            component[ev_name] = ev_value
-        params['components'][service_name] = component
-    with open(join(output_path, 'params.libsonnet'), 'w') as f:
-        json.dump(params, f)
-
-
-def write_deployment_jsonnet(output_path, template, service):
+def write_deployment_kustomize(output_path, service_def):
     data = ''
-    for line in [line.rstrip('\n') for line in open(template)]:
-        if '@@componentName@@' in line:
-            data += line.replace('@@componentName@@', service['name'])
-            data += '\r\n'
-        elif '@@labels@@' in line:
-            labels = ''
-            service_labels = service.get('labels', {})
-            for service_label_name, service_label_value in service_labels.items():
-                labels += '  {}: params.{}@'.format(
-                    service_label_name, service_label_value)
-            labels = labels[:-1]
-            labels = labels.replace('@', ',\r\n')
-            data += labels
-            data += '\r\n'
-        elif '@@withEnv@@' in line:
-            service_env_variables = service.get('environment_variables', {})
-            for env_variable_name, env_variable_value in service_env_variables.items():
-                data += '  .withEnv(container.envType.new("{}", params.{}))'.format(
-                    env_variable_value['name'], env_variable_name)
-                data += '\r\n'
-        else:
-            data += line
-            data += '\r\n'
-    with open(join(output_path, service['name'] + '.jsonnet'), 'w') as f:
+    env_variables = service_def.get('environment_variables', {})
+    for ev_name, ev in env_variables.items():
+        ev_value = ev.get('value', None)
+        if ev_value == None:
+            raise Exception('{}. {} has no value'.format(service_def['name'], ev_name))
+        data += '{}={}\r\n'.format(ev['name'], ev_value)
+
+    with open(join(output_path, service_def['name'], 'configMap.env'), 'w') as f:
         f.write(data)
 
 
@@ -381,17 +341,26 @@ def main():
     set_replicas(environment_def, resolved_services)
 
     print(json.dumps(resolved_services, indent=4))
+    
+    export_gateways(join(args.output, 'infrastructure', 'vamp', 'gateways'), resolved_services, environment_def)
 
-    export_gateways(args.output, resolved_services, environment_def)
-
-    if args.output_format == OF_KSONNET:
-        export_params(args.output, resolved_services)
+    if args.output_format == OF_KUSTOMIZE:
         for _, service in resolved_services.items():
-            write_deployment_jsonnet(
-                args.output, args.deployment_template, service)
+            write_deployment_kustomize(join(args.output, 'services'), service)
     else:
         raise Exception(
             'Unsupported output format: {}'.format(args.output_format))
+
+    computed_services = []
+    for _, service in resolved_services.items():
+        entry = {}
+        entry['name'] = service['name']
+        entry['version'] = service['tag']
+        computed_services.append(entry)
+    environment_def['computed-services'] = computed_services
+    environment_def['updated'] = True
+    
+    write_yaml(args.environment, environment_def)
 
 
 if __name__ == '__main__':
