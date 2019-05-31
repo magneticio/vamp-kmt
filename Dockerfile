@@ -4,6 +4,12 @@ ENV FORKLIFT_VERSION 0.1.16
 ENV KUBECTL_VERSION 1.14.2
 ENV KUSTOMIZE_VERSION 2.0.3
 
+# Install envsubst
+RUN sudo apt-get update && \
+    sudo apt-get -y install gettext-base && \
+    sudo apt-get clean && \
+    sudo rm -rf /var/lib/apt/lists/*
+
 # Install forklift
 RUN sudo curl -L https://github.com/magneticio/forklift/releases/download/v${FORKLIFT_VERSION}/forklift-linux-amd64  -o /usr/bin/forklift && \
     sudo chmod +x /usr/bin/forklift
