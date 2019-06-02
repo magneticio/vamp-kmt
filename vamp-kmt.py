@@ -292,7 +292,10 @@ def export_gateways(output_path, services_to_deploy, env):
 
         data = ''
         data += 'name: {}\n'.format(env_service['name'])
-        data += 'port: {}\n'.format(env_service['port'])
+        data += 'kind: gateways'
+        data += 'deployed: false'
+        if 'port' in env_service:
+            data += 'port: {}\n'.format(env_service['port'])
         data += 'selector: {}\n'.format(selector)
 
         with open(join(output_path, env_service['name'] + '.yaml'), 'w') as f:
