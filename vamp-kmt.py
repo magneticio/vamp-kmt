@@ -292,11 +292,13 @@ def export_gateways(output_path, services_to_deploy, env):
 
         data = ''
         data += 'name: {}\n'.format(env_service['name'])
-        data += 'kind: gateways'
-        data += 'deployed: false'
+        data += 'kind: gateways\n'
+        data += 'deployed: false\n'
         if 'port' in env_service:
             data += 'port: {}\n'.format(env_service['port'])
         data += 'selector: {}\n'.format(selector)
+        if 'policy' in env_service['vamp']['gateway']:
+            data += 'metadata:\n  release.vamp.io/policy: {}\n'.format(env_service['vamp']['gateway']['policy'])
 
         with open(join(output_path, env_service['name'] + '.yaml'), 'w') as f:
             f.write(data)
@@ -344,7 +346,7 @@ def main():
     set_labels(environment_def, resolved_services)
     set_replicas(environment_def, resolved_services)
 
-    export_gateways(join(args.output, 'infrastructure', 'vamp', 'gateways'), resolved_services, environment_def)
+    export_gateways(join(args.output, 'infrastructure', 'vamp', 'config', 'gateways'), resolved_services, environment_def)
 
     if args.output_format == OF_KUSTOMIZE:
         for _, service in resolved_services.items():
