@@ -75,15 +75,10 @@ def parse_args():
         type=directory,
         help='location of the application definitions')
 
-    environment_group = parser.add_mutually_exclusive_group(required=True)
-    environment_group.add_argument(
+    parser.add_argument(
         '-E', '--environment',
         type=data_file,
-        help='application definition')
-    environment_group.add_argument(
-        '-e', '--environment-defs',
-        type=directory,
-        help='location of the application definitions')
+        help='environment definition')
 
     parser.add_argument(
         '-o', '--output',
@@ -145,24 +140,6 @@ def get_file_paths(dir_path, extensions, recursive=False):
 
 def get_service_defs_file_paths(service_defs_dir_path):
     return get_file_paths(service_defs_dir_path, JSON_EXTENSIONS, recursive=True)
-
-
-def get_environment_def_file_path(environment_defs_dir_path, environment):
-    environment_defs_file_paths = get_file_paths(
-        environment_defs_dir_path, DATA_FILE_EXTENSIONS)
-    environment_defs_file_paths.extend(get_file_paths(
-        '{}/{}'.format(environment_defs_dir_path, environment), DATA_FILE_EXTENSIONS))
-    environment_file_path = next(
-        filter(
-            lambda p: ntpath.basename(
-                environment_defs_dir_path).startswith(environment),
-            environment_defs_file_paths
-        ), None
-    )
-    if environment_file_path == None:
-        raise Exception('No environment definition found for `{}` in `{}`'.format(
-            environment, environment_defs_dir_path))
-    return environment_file_path
 
 
 def add_version(service_def, version):
