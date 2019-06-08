@@ -65,15 +65,10 @@ def parse_args():
         type=directory,
         help='location of the service definitions')
 
-    application_group = parser.add_mutually_exclusive_group(required=True)
-    application_group.add_argument(
+    parser.add_argument(
         '-A', '--application',
         type=data_file,
         help='application definition')
-    application_group.add_argument(
-        '-a', '--application-defs',
-        type=directory,
-        help='location of the application definitions')
 
     parser.add_argument(
         '-E', '--environment',
