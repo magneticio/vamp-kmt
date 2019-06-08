@@ -15,6 +15,19 @@ JSON_EXTENSIONS = ['.json']
 YAML_EXTENSIONS = ['.yml', '.yaml']
 DATA_FILE_EXTENSIONS = JSON_EXTENSIONS + YAML_EXTENSIONS
 
+RELEASE_PLAN_NOT_STARTED = 'not started'
+RELEASE_PLAN_STARTED = 'started'
+RELEASE_PLAN_FINISHED = 'finished'
+RELEASE_PLAN_FAILED = 'failed'
+RELEASE_PLAN_ABORTED = 'aborted'
+RELEASE_PLAN_SKIPPED = 'skipped'
+RELEASE_PLAN_PENDING = 'pending'
+
+CAN_RELEASE = [RELEASE_PLAN_NOT_STARTED, RELEASE_PLAN_STARTED, RELEASE_PLAN_FINISHED]
+CANNOT_RELEASE = [RELEASE_PLAN_FAILED, RELEASE_PLAN_ABORTED, RELEASE_PLAN_SKIPPED, RELEASE_PLAN_PENDING]
+
+release_plan_lut = {}
+
 
 def check_extension(file_path, extensions):
     for extension in extensions:
@@ -76,6 +89,11 @@ def parse_args():
         help='environment definition')
 
     parser.add_argument(
+        '-r', '--release-plans',
+        type=directory,
+        help='location of the release plans')
+
+    parser.add_argument(
         '-o', '--output',
         type=directory,
         default='.',
@@ -108,6 +126,11 @@ def read_json(json_file_path):
         return json.load(f)
 
 
+def write_json(json_file_path, data):
+    with open(json_file_path, 'w') as f:
+        json.dump(data, f)
+
+
 def read_data_file(file_path):
     if check_extension(file_path, YAML_EXTENSIONS):
         return read_yaml(file_path)
@@ -133,8 +156,41 @@ def get_file_paths(dir_path, extensions, recursive=False):
     return paths
 
 
+def build_release_plan_lut(environment_name, release_plan_file_path):
+    global release_plan_lut
+    for release_plan_file_path in get_file_paths(release_plan_file_path, JSON_EXTENSIONS, recursive=True):
+        print ("Reading: " + release_plan_file_path)
+        release_plan = read_data_file(release_plan_file_path)       
+        service = release_plan_lut.get(release_plan['service']['name'])
+        if service == None:
+            service = {}
+            release_plan_lut[release_plan['service']['name']] = service
+        if release_plan['status'] in [RELEASE_PLAN_NOT_STARTED, RELEASE_PLAN_STARTED]:
+            # there is an active release plan for this version, so find the status for this environment
+            for group in release_plan['releaseGroups']:
+                for environment in group['environments']:
+                    if environment['name'] == environment_name:
+                        if (not group['canStart'] and environment['status'] == RELEASE_PLAN_NOT_STARTED):
+                            service[release_plan['service']['version']] = RELEASE_PLAN_PENDING
+                        else:
+                            service[release_plan['service']['version']] = environment['status']
+        else:
+            # release plan is in an aborted failed state
+            service[release_plan['service']['version']] = release_plan['status']
+    print(release_plan_lut)
+
+
 def get_service_defs_file_paths(service_defs_dir_path):
     return get_file_paths(service_defs_dir_path, JSON_EXTENSIONS, recursive=True)
+
+
+def get_service_defs(service_def_file_paths):
+    service_defs = {}
+    for service_def_file_path in service_def_file_paths:
+        print ("Reading: " + service_def_file_path)
+        file_content = read_data_file(service_def_file_path)
+        service_defs[file_content['name']] = file_content
+    return service_defs
 
 
 def add_version(service_def, version):
@@ -148,15 +204,6 @@ def add_version(service_def, version):
         service_def['labels'] += version_labels
 
 
-def get_service_defs(service_def_file_paths):
-    service_defs = {}
-    for service_def_file_path in service_def_file_paths:
-        print ("Reading: " + service_def_file_path)
-        file_content = read_data_file(service_def_file_path)
-        service_defs[file_content['name']] = file_content
-    return service_defs
-
-
 def flatten_service_version(service_def, version_tag):
     sd = copy.deepcopy(service_def)
     sd['versions'] = None
@@ -166,10 +213,16 @@ def flatten_service_version(service_def, version_tag):
     return sd
 
 
-def subst_param(value):
-    if value[0] == '<':
-        return value.replace('<', '').replace('>', '')
-    return value
+def filter_version(name, version, filtered_versions):
+    try:
+        status = release_plan_lut[name][version]
+        if status in CAN_RELEASE:
+            filtered_versions.append(version)
+        else:
+            print('*** {}: version {} has a release plan in {} state'.format(name, version, status))
+    except KeyError:
+        print('{}: no release plan for version {}'.format(name, version))
+        filtered_versions.append(version)
 
 
 def resolve_dependencies(requested_services, service_defs, resolved_services):
@@ -182,31 +235,54 @@ def resolve_dependencies(requested_services, service_defs, resolved_services):
         service_def = service_defs.get(name, None)
         if service_def == None:
             raise Exception('No matching service definition found for ' + name)
+        
+        # get the hightest 'listed' version
         available_versions = []
         for version in service_def['versions']:
             available_versions.append(version['tag'])
         highest_version = max_satisfying(available_versions, req_version)
+
+        # check to see if it can be used
+        status = ''
+        usable_versions = []
+        if highest_version:
+            status = release_plan_lut[name][highest_version]
+            if status in CANNOT_RELEASE:
+                print('{}: version {} has a release plan in {} state'.format(name, version['tag'], status))
+                for version in service_def['versions']:
+                    filter_version(name, version['tag'], usable_versions)
+                highest_version = max_satisfying(usable_versions, req_version)
+
         if highest_version == None:
-            raise Exception('No matching version found for {} {}\nAvailable versions: {}'.format(
-                name, req_version, available_versions))
+            resolved_services.clear()
+            if status in CANNOT_RELEASE:
+                print('{}: no usable version found for {}'.format(name, req_version))
+                print('A matching version was found but release plan is in {} state'.format(status))
+                print('Available versions: {}'.format(available_versions))
+                print('Usable versions: {}'.format(usable_versions))
+            else:
+                print('{}: no matching version found for {}'.format(name, req_version))
+                print('Available versions: {}'.format(available_versions))
         else:
             print('{}: resolved {} to version {} from {}'.format(
                 name, req_version, highest_version, available_versions))
-        resolved_version = flatten_service_version(
-            service_def, highest_version)
-        resolved_services[name] = resolved_version
-        resolve_dependencies(
-            resolved_version['dependencies'], service_defs, resolved_services)
+            resolved_version = flatten_service_version(service_def, highest_version)
+            resolved_services[name] = resolved_version
+            resolve_dependencies(resolved_version['dependencies'], service_defs, resolved_services)
+
+
+def subst_param(value):
+    if value[0] == '<':
+        return value.replace('<', '').replace('>', '')
+    return value
 
 
 def resolve_services(requested_services, service_defs):
     resolved_services = {}
     resolve_dependencies(requested_services, service_defs, resolved_services)
-
     for name, service_def in resolved_services.items():
         ev_map = {}
-        service_def_env_variables = service_def.get(
-            'environment_variables', [])
+        service_def_env_variables = service_def.get('environment_variables', [])
         for env_variable in service_def_env_variables:
             ev_map[env_variable.lower()] = {
                 'name': env_variable, 'value': None}
@@ -289,6 +365,60 @@ def write_deployment_kustomize(output_path, service_def):
         with open(join(output_path, service_def['name'], 'configMap.env'), 'w') as f:
             f.write(data)
 
+def update_release_group(release_plan, group):
+    # check if group is 'finished'
+    group_finished = True
+    for environment in group['environments']:
+        if not environment['status'] in [RELEASE_PLAN_FINISHED, RELEASE_PLAN_SKIPPED]:
+            group_finished = False
+            break
+    if group_finished:
+        group['status'] = RELEASE_PLAN_FINISHED
+        group['canStart'] = False
+
+        # update next group and overall plan
+        all_groups_finished = True
+        for g in release_plan['releaseGroups']:
+            if g['group'] == group['group'] + 1 and not g['canStart'] and g['status'] == RELEASE_PLAN_NOT_STARTED:
+                g['canStart'] = True
+                break
+            if g['status'] != RELEASE_PLAN_FINISHED:
+                all_groups_finished = False
+                break
+        if all_groups_finished:
+            release_plan['status'] = RELEASE_PLAN_FINISHED
+
+
+def update_release_plan(environment_name, service_name, version, status, release_plan_file_path):
+    file_path = join(release_plan_file_path, '{}-{}.json'.format(service_name, version))
+    release_plan = read_json(file_path)
+
+    if status == RELEASE_PLAN_STARTED:
+        if release_plan['status'] == RELEASE_PLAN_NOT_STARTED:
+            release_plan['status'] = RELEASE_PLAN_STARTED
+
+    for group in release_plan['releaseGroups']:
+        for environment in group['environments']:
+            if environment['name'] == environment_name:
+                environment['status'] = status
+                if status == RELEASE_PLAN_STARTED and group['status'] == RELEASE_PLAN_NOT_STARTED:
+                    # mark group as started
+                    group['status'] = RELEASE_PLAN_STARTED
+                elif status in [RELEASE_PLAN_FAILED, RELEASE_PLAN_ABORTED]:
+                    # mark group as failed/aborted
+                    group['status'] = status
+                    group['canStart'] = False
+                    if status == RELEASE_PLAN_FAILED:
+                        release_plan['status'] = RELEASE_PLAN_FAILED
+                elif status == RELEASE_PLAN_FINISHED:
+                    update_release_group(release_plan, group)
+                break
+        else:
+            continue
+        break
+
+    print('Updating release plan: {}'.format(file_path))
+    write_json(file_path, release_plan)
 
 def main():
     args = parse_args()
@@ -302,8 +432,12 @@ def main():
     if environment_def['environment']['name'] != application_def['environment']['name']:
         raise Exception(
             'There was a mismatch in application definition: `{}` and environment definition: `{}`'.format(
-                application_def.environment.name, environment_def.environment.name)
+                application_def['environment']['name'], environment_def['environment']['name'])
         )
+
+    environment_name = environment_def['environment']['name']
+
+    build_release_plan_lut(environment_name, args.release_plans)
 
     service_def_file_paths = get_service_defs_file_paths(args.service_defs)
     if len(service_def_file_paths) == 0:
@@ -311,14 +445,19 @@ def main():
             'No service definitions found reading: {}'.format(args.service_defs))
     service_defs = get_service_defs(service_def_file_paths)
 
-    resolved_services = resolve_services(
-        application_def['services'], service_defs)
+    resolved_services = resolve_services(application_def['services'], service_defs)
+    if not resolved_services:
+        # dependency resolution failed, so do nothing
+        print ('Quiting, service resolution did not produce a result')
+        exit()
+    
     set_environment_variables(application_def, resolved_services)
     set_environment_variables(environment_def, resolved_services)
     set_labels(environment_def, resolved_services)
     set_replicas(environment_def, resolved_services)
 
-    export_gateways(join(args.output, 'infrastructure', 'vamp', 'config', 'gateways'), resolved_services, environment_def)
+    export_gateways(join(args.output, 'infrastructure', 'vamp', 'config', 'gateways'), 
+        resolved_services, environment_def)
 
     if args.output_format == OF_KUSTOMIZE:
         for _, service in resolved_services.items():
@@ -333,6 +472,12 @@ def main():
         entry['name'] = service['name']
         entry['version'] = service['tag']
         computed_services.append(entry)
+
+        # update the release plans
+        if release_plan_lut[entry['name']][entry['version']] == RELEASE_PLAN_NOT_STARTED:
+            update_release_plan(environment_name, entry['name'], entry['version'], 
+                RELEASE_PLAN_STARTED, args.release_plans)
+
     environment_def['computed-services'] = computed_services
     environment_def['updated'] = True
     
