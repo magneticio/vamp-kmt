@@ -175,7 +175,7 @@ def build_release_plan_lut(environment_name, release_plan_file_path):
                         else:
                             service[release_plan['service']['version']] = environment['status']
         else:
-            # release plan is in an aborted failed state
+            # release plan is in an aborted/failed state
             service[release_plan['service']['version']] = release_plan['status']
     print(release_plan_lut)
 
@@ -301,7 +301,11 @@ def set_environment_variables(source, target):
     for s in source['services']:
         env_variables = s.get('environment_variables', {})
         for env_name, env_value in env_variables.items():
-            target[s['name']]['environment_variables'][env_name]['value'] = env_value
+            try:
+                target[s['name']]['environment_variables'][env_name]['value'] = env_value
+            except KeyError:
+                # this can happen when downgrading
+                print('{}: service does not have environment variable for "{}"'.format(s['name'], env_name))
 
 
 def set_labels(source, target):
