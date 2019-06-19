@@ -246,12 +246,15 @@ def resolve_dependencies(requested_services, service_defs, resolved_services):
         status = ''
         usable_versions = []
         if highest_version:
-            status = release_plan_lut[name][highest_version]
-            if status in CANNOT_RELEASE:
-                print('{}: version {} has a release plan in {} state'.format(name, version['tag'], status))
-                for version in service_def['versions']:
-                    filter_version(name, version['tag'], usable_versions)
-                highest_version = max_satisfying(usable_versions, req_version)
+            try:
+                status = release_plan_lut[name][highest_version]
+                if status in CANNOT_RELEASE:
+                    print('{}: version {} has a release plan in {} state'.format(name, version['tag'], status))
+                    for version in service_def['versions']:
+                        filter_version(name, version['tag'], usable_versions)
+                    highest_version = max_satisfying(usable_versions, req_version)
+            except KeyError:
+                print('{}: no release plan for version {}'.format(name, highest_version))
 
         if highest_version == None:
             resolved_services.clear()
@@ -324,6 +327,7 @@ def set_replicas(source, target):
 
 def export_gateways(output_path, services_to_deploy, env):
     for env_service in env['services']:
+        print ('Exporting gateway for {}'.format(env_service['name']))
         selector = ''
         if env_service['vamp']['gateway']['selector']['type'] == 'label':
             dpl_service = services_to_deploy[env_service['name']]
@@ -478,10 +482,13 @@ def main():
         computed_services.append(entry)
 
         # update the release plans
-        if release_plan_lut[entry['name']][entry['version']] == RELEASE_PLAN_NOT_STARTED:
-            update_release_plan(environment_name, entry['name'], entry['version'], 
-                RELEASE_PLAN_STARTED, args.release_plans)
-
+        try:
+            if release_plan_lut[entry['name']][entry['version']] == RELEASE_PLAN_NOT_STARTED:
+                update_release_plan(environment_name, entry['name'], entry['version'], 
+                    RELEASE_PLAN_STARTED, args.release_plans)
+        except KeyError:
+            pass
+        
     environment_def['computed-services'] = computed_services
     environment_def['updated'] = True
     
