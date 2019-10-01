@@ -5,10 +5,13 @@ import json
 import ntpath
 from os import listdir, makedirs
 from os.path import exists, isdir, isfile, join
+from shutil import copy2
 
 from semver import max_satisfying, satisfies
 
 import yaml
+
+
 
 OF_KUSTOMIZE = 'kustomize'
 JSON_EXTENSIONS = ['.json']
@@ -283,7 +286,7 @@ def subst_param(value):
 def resolve_services(requested_services, service_defs):
     resolved_services = {}
     resolve_dependencies(requested_services, service_defs, resolved_services)
-    for name, service_def in resolved_services.items():
+    for _, service_def in resolved_services.items():
         ev_map = {}
         service_def_env_variables = service_def.get('environment_variables', [])
         for env_variable in service_def_env_variables:
@@ -378,6 +381,23 @@ def write_deployment_kustomize(output_path, service_def):
                 pass
         with open(join(directory, f"{service_def['name']}-configMap.env"), 'w') as f:
             f.write(data)
+
+
+def handle_deployment_sidecars(output_path, service_def):
+    dependencies = service_def.get('dependencies', [])
+    for dependency in dependencies:
+        if dependency.get('sidecar', False):
+            src = join(output_path, dependency['name'], f"{dependency['name']}-configMap.env")
+            if exists(src):
+                print(f"Copying sidecar config for {service_def['name']}: {dependency['name']}-configMap.env")
+                dst = join(output_path, service_def['name'])
+                if not exists(dst):
+                    try:
+                        makedirs(dst, exist_ok=True)
+                    except FileExistsError:
+                        pass
+                copy2(src, dst)
+
 
 def update_release_group(release_plan, group):
     # check if group is 'finished'
@@ -476,6 +496,9 @@ def main():
     if args.output_format == OF_KUSTOMIZE:
         for _, service in resolved_services.items():
             write_deployment_kustomize(join(args.output, 'services'), service)
+
+        for _, service in resolved_services.items():
+            handle_deployment_sidecars(join(args.output, 'services'), service)
     else:
         raise Exception(
             'Unsupported output format: {}'.format(args.output_format))
