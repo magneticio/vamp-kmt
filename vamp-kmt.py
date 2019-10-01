@@ -3,8 +3,8 @@ import copy
 import glob
 import json
 import ntpath
-from os import listdir
-from os.path import isdir, isfile, join
+from os import listdir, makedirs
+from os.path import exists, isdir, isfile, join
 
 from semver import max_satisfying, satisfies
 
@@ -370,7 +370,13 @@ def write_deployment_kustomize(output_path, service_def):
         data += '{}={}\r\n'.format(ev['name'], ev_value)
 
     if data != '':
-        with open(join(output_path, service_def['name'], 'configMap.env'), 'w') as f:
+        directory = join(output_path, service_def['name'])
+        if not exists(directory):
+            try:
+                makedirs(directory, exist_ok=True)
+            except FileExistsError:
+                pass
+        with open(join(directory, f"{service_def['name']}-configMap.env"), 'w') as f:
             f.write(data)
 
 def update_release_group(release_plan, group):
