@@ -1,6 +1,7 @@
--i https://pypi.org/simple
-gitdb2==2.0.5
+-i https://pypi.org/simple/
+gitdb2==4.0.2
+gitdb==4.0.6
 gitpython==2.1.11
 node-semver==0.6.1
-pyyaml==5.1
-smmap2==2.0.5
+pyyaml==5.4
+smmap==3.0.5
